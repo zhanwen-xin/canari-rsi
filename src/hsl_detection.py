@@ -116,7 +116,6 @@ class hsl_detection:
             std_obs_preds.append(var_obs_pred**0.5)
 
             #################################### Repeat with generate_model ###################################
-            # Base model filter process, same as in model.py
             _,_,_,_ = self.generate_model.forward(x,
                                                     mu_lstm_pred=mu_lstm_pred,
                                                     var_lstm_pred=var_lstm_pred,)
@@ -159,9 +158,8 @@ class hsl_detection:
         return np.array(mu_obs_preds).flatten(), np.array(std_obs_preds).flatten(), np.array(mu_ar_preds).flatten(), np.array(std_ar_preds).flatten()
     
     def estimate_LTd_dist(self):
-        print('mean and std before roll out synthetic data', np.mean(self.LTd_buffer), np.std(self.LTd_buffer))
+        print('Estimating LTd distribution ...')
         # Roll out ten synthetic time series
-        # # Generate synthetic time series
         covariate_col = self.data_processor.covariates_col
         train_index, val_index, test_index = self.data_processor.get_split_indices()
         time_covariate_info = {'initial_time_covariate': self.data_processor.data.values[val_index[-1], self.data_processor.covariates_col].item(),
@@ -221,74 +219,9 @@ class hsl_detection:
                 mu_ar_preds.append(mu_ar_pred)
                 std_ar_preds.append(var_ar_pred**0.5)
 
-            # states_mu_prior = np.array(base_model_copy.states.mu_prior)
-            # states_var_prior = np.array(base_model_copy.states.var_prior)
-            # states_drift_mu_prior = np.array(drift_model_copy.states.mu_prior)
-            # states_drift_var_prior = np.array(drift_model_copy.states.var_prior)
-
-            # fig = plt.figure(figsize=(10, 9))
-            # gs = gridspec.GridSpec(7, 1)
-            # ax0 = plt.subplot(gs[0])
-            # ax1 = plt.subplot(gs[1])
-            # ax2 = plt.subplot(gs[2])
-            # ax3 = plt.subplot(gs[3])
-            # ax4 = plt.subplot(gs[4])
-            # ax5 = plt.subplot(gs[5])
-            # ax6 = plt.subplot(gs[6])
-            # # print(base_model_copy.states.mu_prior)
-            # ax0.plot(states_mu_prior[:, 0].flatten(), label='local level')
-            # ax0.fill_between(np.arange(len(states_mu_prior[:, 0])),
-            #                 states_mu_prior[:, 0].flatten() - states_var_prior[:, 0, 0]**0.5,
-            #                 states_mu_prior[:, 0].flatten() + states_var_prior[:, 0, 0]**0.5,
-            #                 alpha=0.5)
-            # ax0.plot(generated_ts[k])
-
-            # ax1.plot(states_mu_prior[:, 1].flatten(), label='local trend')
-            # ax1.fill_between(np.arange(len(states_mu_prior[:, 1])),
-            #                 states_mu_prior[:, 1].flatten() - states_var_prior[:, 1, 1]**0.5,
-            #                 states_mu_prior[:, 1].flatten() + states_var_prior[:, 1, 1]**0.5,
-            #                 alpha=0.5)
-            
-            # ax2.plot(states_mu_prior[:, 2].flatten(), label='lstm')
-            # ax2.fill_between(np.arange(len(states_mu_prior[:, 2])),
-            #                 states_mu_prior[:, 2].flatten() - states_var_prior[:, 2, 2]**0.5,
-            #                 states_mu_prior[:, 2].flatten() + states_var_prior[:, 2, 2]**0.5,
-            #                 alpha=0.5)
-            
-            # ax3.plot(states_mu_prior[:, 3].flatten(), label='autoregression')
-            # ax3.fill_between(np.arange(len(states_mu_prior[:, 3])),
-            #                 states_mu_prior[:, 3].flatten() - states_var_prior[:, 3, 3]**0.5,
-            #                 states_mu_prior[:, 3].flatten() + states_var_prior[:, 3, 3]**0.5,
-            #                 alpha=0.5)
-            # ax4.plot(np.array(mu_ar_preds).flatten(), label='obs')
-            # ax4.fill_between(np.arange(len(mu_ar_preds)),
-            #                 np.array(mu_ar_preds).flatten() - np.array(std_ar_preds).flatten(),
-            #                 np.array(mu_ar_preds).flatten() + np.array(std_ar_preds).flatten(),
-            #                 alpha=0.5)
-            # # ax4.plot(states_drift_mu_prior[:, 0].flatten())
-            # # ax4.fill_between(np.arange(len(states_drift_mu_prior[:, 0])),
-            # #                 states_drift_mu_prior[:, 0].flatten() - states_drift_var_prior[:, 0, 0]**0.5,
-            # #                 states_drift_mu_prior[:, 0].flatten() + states_drift_var_prior[:, 0, 0]**0.5,
-            # #                 alpha=0.5)
-            # ax4.set_ylabel('LLd')
-            # ax5.plot(states_drift_mu_prior[:, 1].flatten())
-            # ax5.fill_between(np.arange(len(states_drift_mu_prior[:, 1])),
-            #                 states_drift_mu_prior[:, 1].flatten() - states_drift_var_prior[:, 1, 1]**0.5,
-            #                 states_drift_mu_prior[:, 1].flatten() + states_drift_var_prior[:, 1, 1]**0.5,
-            #                 alpha=0.5)
-            # ax5.set_ylabel('LTd')
-            # ax6.plot(states_drift_mu_prior[:, 2].flatten())
-            # ax6.fill_between(np.arange(len(states_drift_mu_prior[:, 2])),
-            #                 states_drift_mu_prior[:, 2].flatten() - states_drift_var_prior[:, 2, 2]**0.5,
-            #                 states_drift_mu_prior[:, 2].flatten() + states_drift_var_prior[:, 2, 2]**0.5,
-            #                 alpha=0.5)
-            # ax6.set_ylabel('ARd')
-            # plt.show()
-
         self.mu_LTd = np.mean(self.LTd_buffer)
         self.LTd_std = np.std(self.LTd_buffer)
         self.LTd_pdf = common.gaussian_pdf(mu = self.mu_LTd, std = self.LTd_std)
-        print('mean and std after roll out synthetic data',self.mu_LTd, self.LTd_std)
 
     def tune_panm_threshold(self, data: pd.DataFrame):
         lstm_index = self.init_base_model.get_states_index("lstm")
@@ -338,74 +271,7 @@ class hsl_detection:
             i += 1
 
         self.detection_threshold = max(np.nanmax(p_anm_to_tune) * 1.1, 0.1)
-        # self.detection_threshold = np.nanmax(p_anm_to_tune) * 1.1
         print(f"Detection threshold tuned to: {self.detection_threshold}")
-
-        states_mu_prior = np.array(self.init_base_model.states.mu_posterior)
-        states_var_prior = np.array(self.init_base_model.states.var_posterior)
-        states_drift_mu_prior = np.array(self.init_drift_model.states.mu_posterior)
-        states_drift_var_prior = np.array(self.init_drift_model.states.var_posterior)
-
-        # #  Plot
-        #  Plot states from pretrained model
-        fig = plt.figure(figsize=(10, 8))
-        gs = gridspec.GridSpec(8, 1)
-        ax0 = plt.subplot(gs[0])
-        ax1 = plt.subplot(gs[1])
-        ax2 = plt.subplot(gs[2])
-        ax3 = plt.subplot(gs[3])
-        ax4 = plt.subplot(gs[4])
-        ax5 = plt.subplot(gs[5])
-        ax6 = plt.subplot(gs[6])
-        ax7 = plt.subplot(gs[7])
-
-        ax0.plot(states_mu_prior[:, 0].flatten(), label='local level')
-        ax0.fill_between(np.arange(len(states_mu_prior[:, 0])),
-                        states_mu_prior[:, 0].flatten() - states_var_prior[:, 0, 0]**0.5,
-                        states_mu_prior[:, 0].flatten() + states_var_prior[:, 0, 0]**0.5,
-                        alpha=0.5)
-        ax0.plot(data["y"].flatten(), label='observed')
-
-        ax1.plot(states_mu_prior[:, 1].flatten(), label='local trend')
-        ax1.fill_between(np.arange(len(states_mu_prior[:, 1])),
-                        states_mu_prior[:, 1].flatten() - states_var_prior[:, 1, 1]**0.5,
-                        states_mu_prior[:, 1].flatten() + states_var_prior[:, 1, 1]**0.5,
-                        alpha=0.5)
-        
-        ax2.plot(states_mu_prior[:, 2].flatten(), label='lstm')
-        ax2.fill_between(np.arange(len(states_mu_prior[:, 2])),
-                        states_mu_prior[:, 2].flatten() - states_var_prior[:, 2, 2]**0.5,
-                        states_mu_prior[:, 2].flatten() + states_var_prior[:, 2, 2]**0.5,
-                        alpha=0.5)
-        
-        ax3.plot(states_mu_prior[:, 3].flatten(), label='autoregression')
-        ax3.fill_between(np.arange(len(states_mu_prior[:, 3])),
-                        states_mu_prior[:, 3].flatten() - states_var_prior[:, 3, 3]**0.5,
-                        states_mu_prior[:, 3].flatten() + states_var_prior[:, 3, 3]**0.5,
-                        alpha=0.5)
-        
-        ax4.plot(states_drift_mu_prior[:, 0].flatten(), label='LLd')
-        ax4.fill_between(np.arange(len(states_drift_mu_prior[:, 0])),
-                        states_drift_mu_prior[:, 0].flatten() - states_drift_var_prior[:, 0, 0]**0.5,
-                        states_drift_mu_prior[:, 0].flatten() + states_drift_var_prior[:, 0, 0]**0.5,
-                        alpha=0.5)
-        
-        ax5.plot(states_drift_mu_prior[:, 1].flatten(), label='LTd')
-        ax5.fill_between(np.arange(len(states_drift_mu_prior[:, 1])),
-                        states_drift_mu_prior[:, 1].flatten() - states_drift_var_prior[:, 1, 1]**0.5,
-                        states_drift_mu_prior[:, 1].flatten() + states_drift_var_prior[:, 1, 1]**0.5,
-                        alpha=0.5)
-        
-        ax6.plot(states_drift_mu_prior[:, 2].flatten(), label='ARd')
-        ax6.fill_between(np.arange(len(states_drift_mu_prior[:, 2])),
-                        states_drift_mu_prior[:, 2].flatten() - states_drift_var_prior[:, 2, 2]**0.5,
-                        states_drift_mu_prior[:, 2].flatten() + states_drift_var_prior[:, 2, 2]**0.5,
-                        alpha=0.5)
-        
-        ax7.plot(p_anm_to_tune, label='p_anm')
-        ax7.axhline(y=self.detection_threshold, color='r', linestyle='--', label='detection threshold')
-        ax7.set_ylim(0, 1)
-        ax7.set_xlabel('Time step')
 
 
     def tune(self, decay_factor: Optional[float] = 0.9, begin_std_LTd: Optional[float] = 1):
@@ -498,74 +364,6 @@ class hsl_detection:
                     mu_ar_preds.append(mu_ar_pred)
                     std_ar_preds.append(var_ar_pred**0.5)
 
-                # states_mu_prior = np.array(base_model_copy.states.mu_prior)
-                # states_var_prior = np.array(base_model_copy.states.var_prior)
-                # states_drift_mu_prior = np.array(drift_model_copy.states.mu_prior)
-                # states_drift_var_prior = np.array(drift_model_copy.states.var_prior)
-
-                # fig = plt.figure(figsize=(10, 9))
-                # gs = gridspec.GridSpec(8, 1)
-                # ax0 = plt.subplot(gs[0])
-                # ax1 = plt.subplot(gs[1])
-                # ax2 = plt.subplot(gs[2])
-                # ax3 = plt.subplot(gs[3])
-                # ax4 = plt.subplot(gs[4])
-                # ax5 = plt.subplot(gs[5])
-                # ax6 = plt.subplot(gs[6])
-                # ax7 = plt.subplot(gs[7])
-                # # print(base_model_copy.states.mu_prior)
-                # ax0.plot(states_mu_prior[:, 0].flatten(), label='local level')
-                # ax0.fill_between(np.arange(len(states_mu_prior[:, 0])),
-                #                 states_mu_prior[:, 0].flatten() - states_var_prior[:, 0, 0]**0.5,
-                #                 states_mu_prior[:, 0].flatten() + states_var_prior[:, 0, 0]**0.5,
-                #                 alpha=0.5)
-                # ax0.plot(generated_ts[k])
-
-                # ax1.plot(states_mu_prior[:, 1].flatten(), label='local trend')
-                # ax1.fill_between(np.arange(len(states_mu_prior[:, 1])),
-                #                 states_mu_prior[:, 1].flatten() - states_var_prior[:, 1, 1]**0.5,
-                #                 states_mu_prior[:, 1].flatten() + states_var_prior[:, 1, 1]**0.5,
-                #                 alpha=0.5)
-                
-                # ax2.plot(states_mu_prior[:, 2].flatten(), label='lstm')
-                # ax2.fill_between(np.arange(len(states_mu_prior[:, 2])),
-                #                 states_mu_prior[:, 2].flatten() - states_var_prior[:, 2, 2]**0.5,
-                #                 states_mu_prior[:, 2].flatten() + states_var_prior[:, 2, 2]**0.5,
-                #                 alpha=0.5)
-                
-                # ax3.plot(states_mu_prior[:, 3].flatten(), label='autoregression')
-                # ax3.fill_between(np.arange(len(states_mu_prior[:, 3])),
-                #                 states_mu_prior[:, 3].flatten() - states_var_prior[:, 3, 3]**0.5,
-                #                 states_mu_prior[:, 3].flatten() + states_var_prior[:, 3, 3]**0.5,
-                #                 alpha=0.5)
-                # ax4.plot(np.array(mu_ar_preds).flatten(), label='obs')
-                # ax4.fill_between(np.arange(len(mu_ar_preds)),
-                #                 np.array(mu_ar_preds).flatten() - np.array(std_ar_preds).flatten(),
-                #                 np.array(mu_ar_preds).flatten() + np.array(std_ar_preds).flatten(),
-                #                 alpha=0.5)
-                # ax4.plot(states_drift_mu_prior[:, 0].flatten())
-                # ax4.fill_between(np.arange(len(states_drift_mu_prior[:, 0])),
-                #                 states_drift_mu_prior[:, 0].flatten() - states_drift_var_prior[:, 0, 0]**0.5,
-                #                 states_drift_mu_prior[:, 0].flatten() + states_drift_var_prior[:, 0, 0]**0.5,
-                #                 alpha=0.5)
-                # ax4.set_ylabel('LLd')
-                # ax5.plot(states_drift_mu_prior[:, 1].flatten())
-                # ax5.fill_between(np.arange(len(states_drift_mu_prior[:, 1])),
-                #                 states_drift_mu_prior[:, 1].flatten() - states_drift_var_prior[:, 1, 1]**0.5,
-                #                 states_drift_mu_prior[:, 1].flatten() + states_drift_var_prior[:, 1, 1]**0.5,
-                #                 alpha=0.5)
-                # ax5.set_ylabel('LTd')
-                # ax6.plot(states_drift_mu_prior[:, 2].flatten())
-                # ax6.fill_between(np.arange(len(states_drift_mu_prior[:, 2])),
-                #                 states_drift_mu_prior[:, 2].flatten() - states_drift_var_prior[:, 2, 2]**0.5,
-                #                 states_drift_mu_prior[:, 2].flatten() + states_drift_var_prior[:, 2, 2]**0.5,
-                #                 alpha=0.5)
-                # ax6.set_ylabel('ARd')
-                # ax7.plot(p_anm_one_syn_ts)
-                # ax7.set_ylim(-0.05, 1.05)
-                # ax7.set_ylabel('p_anm')
-                # plt.show()
-
                 if (len(np.where(np.array(p_anm_one_syn_ts) > 0.5)[0]) > 0.5):
                     false_alarm = True
                     break
@@ -583,10 +381,6 @@ class hsl_detection:
         lstm_index = self.base_model.get_states_index("lstm")
         mu_lstm_pred, var_lstm_pred = None, None
 
-        # # # Set drift model rigid prior
-        # self.drift_model.var_states = np.diag([1e-12, 1e-12, self.ar_component.var_states.item()])
-
-        # for i, (x, y) in enumerate(zip(data["x"], data["y"])):
         i = 0
         i_before_retract = 0
         trigger = False
@@ -613,7 +407,6 @@ class hsl_detection:
 
                 # Track what NN learns
                 LTd_mu_prior = np.array(self.drift_model.states.mu_prior)[:, 1].flatten()
-                # LTd_history = self._hidden_states_collector(i - 1, LTd_mu_prior)
                 LTd_history = self._hidden_states_collector(self.current_time_step - 1, LTd_mu_prior)
                 LTd_history = np.array(LTd_history.tolist(), dtype=np.float32)
                 LTd_history = (LTd_history - self.mean_train) / self.std_train
@@ -659,16 +452,6 @@ class hsl_detection:
                         self.drift_model.mu_states[1] = self.mu_LTd
                         trigger = True
 
-            # if trigger is False:
-            #     if i == len(data["x"]) - 1:
-            #         self._retract_agent(time_step_back=len(data["x"]) - 1 - 100)
-            #         # current_step_before_retract = copy.copy(i)
-            #         i = 100
-            #         self.current_time_step = self.current_time_step - (len(data["x"]) - 1 - 100)
-            #         trigger = True
-
-            # Base model filter process, same as in model.py
-            # mu_obs_pred, var_obs_pred, _, _ = self.base_model.forward(data["x"][i])
             mu_obs_pred, var_obs_pred, _, _ = self.base_model.forward(data["x"][i])
 
             (
@@ -761,18 +544,16 @@ class hsl_detection:
 
         LL_index = base_model.states_name.index("level")
         LT_index = base_model.states_name.index("trend")
-        # ar_index = base_model.states_name.index("autoregression")
         base_model_prior['mu'][LL_index] += drift_model_prior['mu'][0]
         base_model_prior['mu'][LT_index] += drift_model_prior['mu'][1]
-        # base_model_prior['mu'][ar_index] = drift_model_prior['mu'][2]
         base_model_prior['var'][LL_index, LL_index] += drift_model_prior['var'][0, 0]
         base_model_prior['var'][LT_index, LT_index] += drift_model_prior['var'][1, 1]
-        # base_model_prior['var'][ar_index, ar_index] = drift_model_prior['var'][2, 2]
         drift_model_prior['mu'][0] = 0
         drift_model_prior['mu'][1] = self.mu_LTd
         return base_model_prior, drift_model_prior
     
     def collect_synthetic_samples(self, num_time_series: int = 10, save_to_path: Optional[str] = 'data/hsl_tsad_training_samples/hsl_tsad_train_samples.csv'):
+        print('Collecting synthetic samples to train the intervention model...')
         # Collect samples from synthetic time series
         samples = {'LTd_history': [], 'itv_LT': [], 'itv_LL': [], 'anm_develop_time': [], 'p_anm': []}
 
@@ -797,18 +578,6 @@ class hsl_detection:
                                                                 time_covariate_info=time_covariate_info,
                                                                 add_anomaly=True, anomaly_mag_range=anm_mag_range, 
                                                                 anomaly_begin_range=anm_begin_range, sample_from_lstm_pred=False)
-        # Plot generated time series
-        fig = plt.figure(figsize=(10, 6))
-        gs = gridspec.GridSpec(1, 1)
-        ax0 = plt.subplot(gs[0])
-        norm_data = self.data_processor.standardize_data()
-        for j in range(len(generated_ts)):
-            ax0.plot(np.concatenate((norm_data[train_index, self.data_processor.output_col].reshape(-1), 
-                                        norm_data[val_index, self.data_processor.output_col].reshape(-1), 
-                                        generated_ts[j])))
-        ax0.axvline(x=len(self.data_processor.data.values[train_index, self.data_processor.output_col].reshape(-1))+len(self.data_processor.data.values[val_index, self.data_processor.output_col].reshape(-1)), color='r', linestyle='--')
-        ax0.set_title("Data generation")
-        plt.show()
 
         # # Run the current model on the synthetic time series
         if "lstm" in self.base_model.states_name:
@@ -865,27 +634,11 @@ class hsl_detection:
                     itv_LT = anm_mag_list[k]
                     itv_anm_dev_time = i - anm_begin_list[k]
                     itv_LL = itv_LT * itv_anm_dev_time
-                    # # LL anomaly label
-                    # itv_LT = 0
-                    # itv_anm_dev_time = i - anm_begin_list[k]
-                    # itv_LL = anm_mag_list[k]
-                    
+
                     samples['itv_LT'].append(itv_LT)
                     samples['itv_LL'].append(itv_LL)
                     samples['anm_develop_time'].append(itv_anm_dev_time)
                     samples['p_anm'].append(p_a_I_Yt)
-
-                # if p_a_I_Yt > self.detection_threshold:
-                #     anomaly_detected = True
-                #     break
-                #     # Intervene the model using true anomaly features
-                #     LL_index = base_model_copy.states_name.index("local level")
-                #     LT_index = base_model_copy.states_name.index("local trend")
-                #     base_model_copy.mu_states[LT_index] += anm_mag_list[k]
-                #     base_model_copy.mu_states[LL_index] += anm_mag_list[k] * (i - anm_begin_list[k])
-                #     base_model_copy.mu_states[self.AR_index] = drift_model_copy.mu_states[2]
-                #     drift_model_copy.mu_states[0] = 0
-                #     drift_model_copy.mu_states[1] = self.mu_LTd
 
                 mu_obs_pred, var_obs_pred, _, _ = base_model_copy.forward(x)
                 (
@@ -913,84 +666,6 @@ class hsl_detection:
                 drift_model_copy.set_states(mu_drift_states_posterior, var_drift_states_posterior)
                 mu_ar_preds.append(mu_ar_pred)
                 std_ar_preds.append(var_ar_pred**0.5)
-
-            # states_mu_prior = np.array(base_model_copy.states.mu_prior)
-            # states_var_prior = np.array(base_model_copy.states.var_prior)
-            # states_drift_mu_prior = np.array(drift_model_copy.states.mu_prior)
-            # states_drift_var_prior = np.array(drift_model_copy.states.var_prior)
-
-            # fig = plt.figure(figsize=(10, 9))
-            # gs = gridspec.GridSpec(10, 1)
-            # ax0 = plt.subplot(gs[0])
-            # ax1 = plt.subplot(gs[1])
-            # ax2 = plt.subplot(gs[2])
-            # ax3 = plt.subplot(gs[3])
-            # ax4 = plt.subplot(gs[4])
-            # ax5 = plt.subplot(gs[5])
-            # ax6 = plt.subplot(gs[6])
-            # ax7 = plt.subplot(gs[7])
-            # ax8 = plt.subplot(gs[8])
-            # ax9 = plt.subplot(gs[9])
-            # # print(base_model_copy.states.mu_prior)
-            # ax0.plot(states_mu_prior[:, 0].flatten(), label='local level')
-            # ax0.fill_between(np.arange(len(states_mu_prior[:, 0])),
-            #                 states_mu_prior[:, 0].flatten() - states_var_prior[:, 0, 0]**0.5,
-            #                 states_mu_prior[:, 0].flatten() + states_var_prior[:, 0, 0]**0.5,
-            #                 alpha=0.5)
-            # ax0.axvline(x=anm_begin_list[k], color='r', linestyle='--')
-            # ax0.plot(generated_ts[k])
-
-            # ax1.plot(states_mu_prior[:, 1].flatten(), label='local trend')
-            # ax1.fill_between(np.arange(len(states_mu_prior[:, 1])),
-            #                 states_mu_prior[:, 1].flatten() - states_var_prior[:, 1, 1]**0.5,
-            #                 states_mu_prior[:, 1].flatten() + states_var_prior[:, 1, 1]**0.5,
-            #                 alpha=0.5)
-            
-            # ax2.plot(states_mu_prior[:, 2].flatten(), label='lstm')
-            # ax2.fill_between(np.arange(len(states_mu_prior[:, 2])),
-            #                 states_mu_prior[:, 2].flatten() - states_var_prior[:, 2, 2]**0.5,
-            #                 states_mu_prior[:, 2].flatten() + states_var_prior[:, 2, 2]**0.5,
-            #                 alpha=0.5)
-            
-            # ax3.plot(states_mu_prior[:, 3].flatten(), label='autoregression')
-            # ax3.fill_between(np.arange(len(states_mu_prior[:, 3])),
-            #                 states_mu_prior[:, 3].flatten() - states_var_prior[:, 3, 3]**0.5,
-            #                 states_mu_prior[:, 3].flatten() + states_var_prior[:, 3, 3]**0.5,
-            #                 alpha=0.5)
-            # ax4.plot(np.array(mu_ar_preds).flatten(), label='obs')
-            # ax4.fill_between(np.arange(len(mu_ar_preds)),
-            #                 np.array(mu_ar_preds).flatten() - np.array(std_ar_preds).flatten(),
-            #                 np.array(mu_ar_preds).flatten() + np.array(std_ar_preds).flatten(),
-            #                 alpha=0.5)
-            # ax4.plot(states_drift_mu_prior[:, 0].flatten())
-            # ax4.fill_between(np.arange(len(states_drift_mu_prior[:, 0])),
-            #                 states_drift_mu_prior[:, 0].flatten() - states_drift_var_prior[:, 0, 0]**0.5,
-            #                 states_drift_mu_prior[:, 0].flatten() + states_drift_var_prior[:, 0, 0]**0.5,
-            #                 alpha=0.5)
-            # ax4.set_ylabel('LLd')
-            # ax5.plot(states_drift_mu_prior[:, 1].flatten())
-            # ax5.fill_between(np.arange(len(states_drift_mu_prior[:, 1])),
-            #                 states_drift_mu_prior[:, 1].flatten() - states_drift_var_prior[:, 1, 1]**0.5,
-            #                 states_drift_mu_prior[:, 1].flatten() + states_drift_var_prior[:, 1, 1]**0.5,
-            #                 alpha=0.5)
-            # ax5.set_ylabel('LTd')
-            # ax6.plot(states_drift_mu_prior[:, 2].flatten())
-            # ax6.fill_between(np.arange(len(states_drift_mu_prior[:, 2])),
-            #                 states_drift_mu_prior[:, 2].flatten() - states_drift_var_prior[:, 2, 2]**0.5,
-            #                 states_drift_mu_prior[:, 2].flatten() + states_drift_var_prior[:, 2, 2]**0.5,
-            #                 alpha=0.5)
-            # ax6.set_ylabel('ARd')
-            # ax7.plot(p_anm_one_syn_ts)
-            # ax7.axvline(x=anm_begin_list[k], color='r', linestyle='--')
-            # ax7.set_ylim(-0.05, 1.05)
-            # ax7.set_ylabel('p_anm')
-            # ax8.plot(y_likelihood_a_one_ts, label='itv')
-            # ax8.plot(y_likelihood_na_one_ts, label='no itv')
-            # ax8.set_ylabel('y_likelihood')
-            # ax9.plot(x_likelihood_a_one_ts, label='itv')
-            # ax9.plot(x_likelihood_na_one_ts, label='no itv')
-            # ax9.set_ylabel('x_likelihood')
-            # plt.show()
         
         samples_df = pd.DataFrame(samples)
         samples_df.to_csv(save_to_path, index=False)
@@ -1033,11 +708,6 @@ class hsl_detection:
         samples_target = np.delete(samples_target, zero_indices, axis=0)
         samples_p_anm = np.delete(samples_p_anm, zero_indices, axis=0)
 
-        # panm_b5_indices = np.where(samples_p_anm > 0.5)[0]
-        # samples_p_anm = np.delete(samples_p_anm, panm_b5_indices, axis=0)
-        # samples_input = np.delete(samples_input, panm_b5_indices, axis=0)
-        # samples_target = np.delete(samples_target, panm_b5_indices, axis=0)
-
         # Train the model using 80% of the samples
         n_samples = len(samples_input)
         n_train = int(n_samples * 0.8)
@@ -1050,16 +720,8 @@ class hsl_detection:
             self.std_train = train_X.std()
             self.mean_target = train_y.mean(axis=0)
             self.std_target = train_y.std(axis=0)
-        print('mean and std of training input', self.mean_train, self.std_train)
-        print('mean and std of training target', self.mean_target, self.std_target)
 
         train_X = (train_X - self.mean_train) / self.std_train
-
-        # # Remove when using time series with different anomaly magnitude
-        # self.mean_target[0] = 0
-        # self.std_target[0] = 1
-        # self.mean_target = np.zeros_like(self.mean_target)
-        # self.std_target = np.ones_like(self.std_target)
         train_y = (train_y - self.mean_target) / self.std_target
 
         # Validation set 10% of the samples
@@ -1090,7 +752,7 @@ class hsl_detection:
             n_batch_val = n_val // self.batch_size
             patience = 10
             best_loss = float('inf')
-            # for epoch in range(max_training_epoch):
+            print('Start training intervention model...')
             for epoch in range(max_training_epoch):
                 for i in range(n_batch_train):
                     prediction_mu, _ = self.model.net(train_X[i*self.batch_size:(i+1)*self.batch_size])
@@ -1145,15 +807,6 @@ class hsl_detection:
 
             print(f'Test loss {loss_test}')
 
-        # # Denormalize the prediction
-        # y_pred = y_pred.detach().numpy()
-        # y_pred_denorm = y_pred * self.std_target + self.mean_target
-        # # y_pred_var_denorm = test_pred_y_var * self.std_target ** 2
-        # y_test_denorm = test_y * self.std_target + self.mean_target
-        # print(y_test_denorm.tolist()[:20])
-        # print(y_pred_denorm.tolist()[:20])
-        # print(np.sqrt(y_pred_var_denorm))
-
         if save_model_path is not None:
             param_dict = self.model.net.state_dict()
             # Save dictionary to file
@@ -1186,9 +839,6 @@ class hsl_detection:
         self.drift_model.states.var_smooth = self.drift_model.states.var_smooth[:remove_until_index]
         self.lstm_history = self.lstm_history[:remove_until_index]
         self.lstm_cell_states = self.lstm_cell_states[:remove_until_index]
-        # self.p_anm_all = self.p_anm_all[:remove_until_index]
-        # self.mu_itv_all = self.mu_itv_all[:remove_until_index]
-        # self.std_itv_all = self.std_itv_all[:remove_until_index]
         self.mu_obs_preds = self.mu_obs_preds[:remove_until_index]
         self.std_obs_preds = self.std_obs_preds[:remove_until_index]
         self.mu_ar_preds = self.mu_ar_preds[:remove_until_index]
@@ -1204,8 +854,6 @@ class hsl_detection:
         self.drift_model.set_states(new_drift_mu_states, new_drift_var_states)
         self.base_model.lstm_output_history = self.lstm_history[-1]
         self.base_model.lstm_net.set_lstm_states(self.lstm_cell_states[-1])
-
-        # pass
 
 class TAGI_Net():
     def __init__(self, n_observations, n_actions):

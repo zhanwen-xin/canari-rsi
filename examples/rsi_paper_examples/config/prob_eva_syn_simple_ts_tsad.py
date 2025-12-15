@@ -1,0 +1,402 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import copy
+from canari.component import LocalTrend, LstmNetwork, Periodic, Autoregression
+from canari import (
+    DataProcess,
+    Model,
+    common,
+    plot_data,
+    plot_prediction,
+    plot_states,
+)
+from src.hsl_detection import hsl_detection
+import pytagi.metric as metric
+import pickle
+import ast
+from tqdm import tqdm
+from matplotlib import gridspec
+from canari.data_visualization import _add_dynamic_grids
+
+
+# # # Read data
+data_file = "./data/toy_time_series/syn_data_simple_phi05.csv"
+df_raw = pd.read_csv(data_file, skiprows=1, delimiter=",", header=None)
+time_series = pd.to_datetime(df_raw.iloc[:, 0])
+df_raw = df_raw.iloc[:, 1:]
+df_raw.index = time_series
+df_raw.index.name = "date_time"
+df_raw.columns = ["obs"]
+
+# Data pre-processing
+output_col = [0]
+train_split=0.3
+validation_split=0.1
+data_processor = DataProcess(
+    data=df_raw,
+    time_covariates=["week_of_year"],
+    train_split=train_split,
+    validation_split=validation_split,
+    output_col=output_col,
+)
+train_data, validation_data, test_data, normalized_data = data_processor.get_splits()
+
+# # # Read test data
+df = pd.read_csv("data/prob_eva_syn_time_series/syn_simple_ts_regen.csv")
+
+# Containers for restored data
+restored_data = []
+for _, row in df.iterrows():
+    values = np.array(eval(row["values"], {"nan": float("nan")}), dtype=float)
+    anomaly_magnitude = float(row["anomaly_magnitude"])
+    anomaly_start_index = int(row["anomaly_start_index"])
+    
+    restored_data.append((values, anomaly_magnitude, anomaly_start_index))
+
+# # Plot generated time series
+# fig = plt.figure(figsize=(10, 6))
+# gs = gridspec.GridSpec(1, 1)
+# ax0 = plt.subplot(gs[0])
+# for j in range(len(restored_data)):
+#     ax0.plot(restored_data[j][0])
+#     ax0.axvline(x=restored_data[j][2]+len(df_raw)-len(test_data["y"]), color='r', linestyle='--')
+# # ax0.axvline(x=len(self.data_processor.data.values[train_index, self.data_processor.output_col].reshape(-1))+len(self.data_processor.data.values[val_index, self.data_processor.output_col].reshape(-1)), color='r', linestyle='--')
+# ax0.set_title("Data generation")
+# plt.show()
+
+
+####################################################################
+######################### Pretrained model #########################
+####################################################################
+# Load model_dict from local
+with open("saved_params/syn_simple_ts_tsmodel.pkl", "rb") as f:
+    model_dict = pickle.load(f)
+
+LSTM = LstmNetwork(
+        look_back_len=13,
+        num_features=2,
+        num_layer=1,
+        num_hidden_unit=50,
+        device="cpu",
+    )
+
+phi_index = model_dict["states_name"].index("phi")
+W2bar_index = model_dict["states_name"].index("W2bar")
+autoregression_index = model_dict["states_name"].index("autoregression")
+
+print("phi_AR =", model_dict['states_optimal'].mu_prior[-1][phi_index].item())
+print("sigma_AR =", np.sqrt(model_dict['states_optimal'].mu_prior[-1][W2bar_index].item()))
+pretrained_model = Model(
+    LocalTrend(mu_states=[0, 0], var_states=[1e-12, 1e-12]),
+    LSTM,
+    Autoregression(std_error=np.sqrt(model_dict['states_optimal'].mu_prior[-1][W2bar_index].item()), 
+                   phi=model_dict['states_optimal'].mu_prior[-1][phi_index].item(), 
+                   mu_states=[model_dict["mu_states"][autoregression_index].item()], 
+                   var_states=[model_dict["var_states"][autoregression_index, autoregression_index].item()]),
+)
+gen_model = Model(
+    # LocalTrend(mu_states=model_dict['states_optimal'].mu_prior[0][0:2].reshape(-1), var_states=np.diag(model_dict['states_optimal'].var_prior[0][0:2, 0:2])),\
+    LocalTrend(mu_states=[0, 0], var_states=[1e-12, 1e-12]),
+    LSTM,
+    Autoregression(phi=model_dict['gen_phi_ar'], std_error=model_dict['gen_sigma_ar'],
+                   mu_states=[model_dict['states_optimal'].mu_prior[0][autoregression_index].item()], 
+                   var_states=[model_dict['states_optimal'].var_prior[0][autoregression_index, autoregression_index].item()]),
+)
+
+pretrained_model.lstm_net.load_state_dict(model_dict["lstm_network_params"])
+gen_model.lstm_net.load_state_dict(model_dict["lstm_network_params"])
+
+ltd_error = 1e-5
+
+hsl_tsad_agent = hsl_detection(base_model=pretrained_model, generate_model=gen_model, data_processor=data_processor, drift_model_process_error_std=ltd_error, y_std_scale = 1)
+
+# Get flexible drift model from the beginning
+hsl_tsad_agent_pre = hsl_detection(base_model=pretrained_model.load_dict(pretrained_model.get_dict()), generate_model=gen_model, data_processor=data_processor, drift_model_process_error_std=ltd_error)
+hsl_tsad_agent_pre.filter(train_data)
+hsl_tsad_agent_pre.filter(validation_data)
+hsl_tsad_agent.drift_model.var_states = hsl_tsad_agent_pre.drift_model.var_states
+hsl_tsad_agent.init_drift_model.var_states = hsl_tsad_agent_pre.drift_model.var_states
+
+
+mu_obs_preds, std_obs_preds, mu_ar_preds, std_ar_preds = hsl_tsad_agent.filter(train_data, buffer_LTd=True)
+mu_obs_preds, std_obs_preds, mu_ar_preds, std_ar_preds = hsl_tsad_agent.filter(validation_data, buffer_LTd=True)
+hsl_tsad_agent.mu_LTd = -1.8543255516705544e-05
+hsl_tsad_agent.LTd_std = 5.909502346945472e-05
+hsl_tsad_agent.LTd_pdf = common.gaussian_pdf(mu = hsl_tsad_agent.mu_LTd, std = hsl_tsad_agent.LTd_std * 1.1)
+# hsl_tsad_agent.tune_panm_threshold(data=normalized_data)
+hsl_tsad_agent.detection_threshold = 0.1638814757675824
+# hsl_tsad_agent.detection_threshold = 0.1638814757675824/1.1 * 10
+
+hsl_tsad_agent.nn_train_with = 'tagiv'
+hsl_tsad_agent.mean_train, hsl_tsad_agent.std_train, hsl_tsad_agent.mean_target, hsl_tsad_agent.std_target = -3.7583715e-05, 0.0004518164, np.array([-4.0172847e-04, -4.7810923e-02, 1.0713673e+02]), np.array([1.1112380e-02, 1.3762859e+00, 6.2584328e+01])
+hsl_tsad_agent.learn_intervention(training_samples_path='data/hsl_tsad_training_samples/itv_learn_samples_syn_simple_ts.csv', 
+                                  load_model_path='saved_params/NN_detection_model_syn_simple_ts.pkl', max_training_epoch=50)
+
+# Store the states, mu_states, var_states, lstm_cell_states, and lstm_output_history of base_model
+states_temp = copy.deepcopy(hsl_tsad_agent.base_model.states)
+mu_states_temp = copy.deepcopy(hsl_tsad_agent.base_model.mu_states)
+var_states_temp = copy.deepcopy(hsl_tsad_agent.base_model.var_states)
+lstm_cell_states_temp = copy.deepcopy(hsl_tsad_agent.base_model.lstm_net.get_lstm_states())
+lstm_output_history_temp = copy.deepcopy(hsl_tsad_agent.base_model.lstm_output_history)
+
+drift_states_temp = copy.deepcopy(hsl_tsad_agent.drift_model.states)
+mu_drift_states_temp = copy.deepcopy(hsl_tsad_agent.drift_model.mu_states)
+var_drift_states_temp = copy.deepcopy(hsl_tsad_agent.drift_model.var_states)
+
+current_time_step_temp = copy.deepcopy(hsl_tsad_agent.current_time_step)
+p_anm_all_temp = copy.deepcopy(hsl_tsad_agent.p_anm_all)
+mu_itv_all_temp = copy.deepcopy(hsl_tsad_agent.mu_itv_all)
+std_itv_all_temp = copy.deepcopy(hsl_tsad_agent.std_itv_all)
+
+results_all = []
+
+for k in tqdm(range(len(restored_data))):
+# for k in tqdm(range(2)):
+#     k += 150
+    df_k = copy.deepcopy(df_raw)
+    # Replace the values in the dataframe with the restored_data[k][0]
+    df_k.iloc[:, 0] = restored_data[k][0]
+
+    data_processor_k = DataProcess(
+        data=df_k,
+        time_covariates=["week_of_year"],
+        train_split=train_split,
+        validation_split=validation_split,
+        output_col=output_col,
+    )
+    _, _, test_data_k, _ = data_processor_k.get_splits()
+
+    anm_start_index = restored_data[k][2]
+    anm_mag = restored_data[k][1]
+    anm_start_index_global = anm_start_index + len(df_k) - len(test_data_k["y"])
+
+    mu_obs_preds, std_obs_preds, mu_ar_preds, std_ar_preds = hsl_tsad_agent.detect(test_data_k, apply_intervention=True)
+
+    all_detection_points = str(np.where(np.array(hsl_tsad_agent.p_anm_all) > hsl_tsad_agent.detection_threshold)[0].tolist())
+    if (np.array(hsl_tsad_agent.p_anm_all) > hsl_tsad_agent.detection_threshold).any():
+        anm_detected_index = np.where(np.array(hsl_tsad_agent.p_anm_all) > hsl_tsad_agent.detection_threshold)[0][0]
+    else:
+        anm_detected_index = len(hsl_tsad_agent.p_anm_all)
+
+    # Get true baseline
+    anm_mag_normed = anm_mag
+    LL_baseline_true = np.zeros_like(df_raw)
+    LT_baseline_true = np.zeros_like(df_raw)
+    for i in range(1, len(df_raw)):
+        if i > anm_start_index_global:
+            LL_baseline_true[i] += anm_mag_normed * (i - anm_start_index_global)
+            LT_baseline_true[i] += anm_mag_normed
+
+    LL_baseline_true += model_dict['early_stop_init_mu_states'][0].item()
+    LL_baseline_true = LL_baseline_true.flatten()
+    LT_baseline_true = LT_baseline_true.flatten()
+
+    # Compute MSE for SKF baselines
+    mu_LL_states = hsl_tsad_agent.base_model.states.get_mean(states_type='prior', states_name="level")
+    mu_LT_states = hsl_tsad_agent.base_model.states.get_mean(states_type='prior', states_name="trend")
+    mse_LL = metric.mse(
+        mu_LL_states[anm_start_index_global+1:],
+        LL_baseline_true[anm_start_index_global+1:],
+    )
+    mse_LT = metric.mse(
+        mu_LT_states[anm_start_index_global+1:],
+        LT_baseline_true[anm_start_index_global+1:],
+    )
+
+    detection_time = anm_detected_index - anm_start_index_global
+
+    results_all.append([anm_mag, anm_start_index_global, all_detection_points, mse_LL, mse_LT, detection_time])
+
+    # # Plot all the baselines, true and estimated
+    # time = data_processor_k.get_time(split="all")
+    # plt.figure()
+    # plt.plot(time, LL_baseline_true, label="True", color='blue')
+    # plt.plot(time, mu_LL_states, label="Online", color='red')
+    # plt.axvline(x=time[anm_start_index], color='k', linestyle='--')
+    # plt.legend()
+    # plt.ylabel('LL')
+
+    # plt.figure()
+    # plt.plot(time, LT_baseline_true, label="True", color='blue')
+    # plt.plot(time, mu_LT_states, label="Online", color='red')
+    # plt.axvline(x=time[anm_start_index], color='k', linestyle='--')
+    # plt.legend()
+    # plt.ylabel('LT')
+    # plt.show()
+
+    # #  Plot
+    # state_type = "prior"
+    # #  Plot states from pretrained model
+    # fig = plt.figure(figsize=(10, 8))
+    # gs = gridspec.GridSpec(5, 1)
+    # ax0 = plt.subplot(gs[0])
+    # ax1 = plt.subplot(gs[1])
+    # ax2 = plt.subplot(gs[2])
+    # ax3 = plt.subplot(gs[3])
+    # ax4 = plt.subplot(gs[4])
+    # time = data_processor_k.get_time(split="all")
+    # plot_data(
+    #     data_processor=data_processor_k,
+    #     standardization=True,
+    #     plot_column=output_col,
+    #     validation_label="y",
+    #     sub_plot=ax0,
+    # )
+    # plot_states(
+    #     data_processor=data_processor_k,
+    #     standardization=True,
+    #     # states=pretrained_model.states,
+    #     states=hsl_tsad_agent.base_model.states,
+    #     states_type=state_type,
+    #     states_to_plot=['level'],
+    #     sub_plot=ax0,
+    # )
+    # ax0.set_xticklabels([])
+    # ax0.plot(time, LL_baseline_true, color='k', linestyle='--')
+    # ax0.axvline(x=time[anm_start_index_global], color='r', linestyle='--')
+    # ax0.set_title(f"IL, mse_LL = {mse_LL:.3e}, mse_LT = {mse_LT:.3e}, detection_time = {detection_time}")
+    # plot_states(
+    #     data_processor=data_processor_k,
+    #     standardization=True,
+    #     states=hsl_tsad_agent.base_model.states,
+    #     states_type=state_type,
+    #     states_to_plot=['trend'],
+    #     sub_plot=ax1,
+    # )
+    # ax1.set_xticklabels([])
+    # ax1.plot(time, LT_baseline_true, color='k', linestyle='--')
+    # plot_states(
+    #     data_processor=data_processor_k,
+    #     standardization=True,
+    #     states=hsl_tsad_agent.base_model.states,
+    #     states_type=state_type,
+    #     states_to_plot=['lstm'],
+    #     sub_plot=ax2,
+    # )
+    # ax2.set_xticklabels([])
+    # plot_states(
+    #     data_processor=data_processor_k,
+    #     standardization=True,
+    #     states=hsl_tsad_agent.base_model.states,
+    #     states_type=state_type,
+    #     states_to_plot=['autoregression'],
+    #     sub_plot=ax3,
+    # )
+    # ax3.set_xticklabels([])
+
+    # ax4.plot(time, hsl_tsad_agent.p_anm_all, color='b')
+    # ax4.set_ylabel("p_anm")
+    # ax4.set_xlim(ax0.get_xlim())
+    # ax4.set_ylim(-0.05, 1.05)
+    # _add_dynamic_grids(ax4, time)
+    # plt.show()
+
+    # Put back the states, mu_states, var_states, lstm_cell_states, and lstm_output_history of base_model
+    hsl_tsad_agent.base_model.states = copy.deepcopy(states_temp)
+    hsl_tsad_agent.base_model.mu_states = copy.deepcopy(mu_states_temp)
+    hsl_tsad_agent.base_model.var_states = copy.deepcopy(var_states_temp)
+    hsl_tsad_agent.base_model.lstm_net.set_lstm_states(lstm_cell_states_temp)
+    hsl_tsad_agent.base_model.lstm_output_history = copy.deepcopy(lstm_output_history_temp)
+    hsl_tsad_agent.drift_model.states = copy.deepcopy(drift_states_temp)
+    hsl_tsad_agent.drift_model.mu_states = copy.deepcopy(mu_drift_states_temp)
+    hsl_tsad_agent.drift_model.var_states = copy.deepcopy(var_drift_states_temp)
+    hsl_tsad_agent.current_time_step = copy.deepcopy(current_time_step_temp)
+    hsl_tsad_agent.p_anm_all = copy.deepcopy(p_anm_all_temp)
+    hsl_tsad_agent.mu_itv_all = copy.deepcopy(mu_itv_all_temp)
+    hsl_tsad_agent.std_itv_all = copy.deepcopy(std_itv_all_temp)
+
+# Save the results to a CSV file
+results_df = pd.DataFrame(results_all, columns=["anomaly_magnitude", "anomaly_start_index", "anomaly_detected_index", "mse_LL", "mse_LT",  "detection_time"])
+results_df.to_csv("saved_results/prob_eva/syn_simple_regen_ts_results_il_test.csv", index=False)
+
+# Load and plot
+df_il = pd.read_csv("saved_results/prob_eva/syn_simple_regen_ts_results_il_test.csv")
+df_il["anomaly_magnitude"] = np.abs(df_il["anomaly_magnitude"]) * 52
+df_il["anomaly_detected_index"] = df_il["anomaly_detected_index"].apply(ast.literal_eval)
+df_il["detection_rate"] = df_il["detection_time"].apply(
+    lambda x: 0 if x >= 52 * 3 else 1
+)
+anm_time_range_begin = 250
+# Sum all the anomaly_start_index
+sum_anm_start_index = df_il["anomaly_start_index"].sum() - anm_time_range_begin * df_il.shape[0]
+false_alarms_il = 0
+neg_detect_indices = []
+for i in range(df_il.shape[0]):
+    if df_il.iloc[i]["detection_time"] < 0:
+        false_alarms_il += len(df_il.iloc[i]["anomaly_detected_index"])
+        neg_detect_indices.append(i)
+# Delete the rows with negative detection time
+df_il = df_il.drop(index=neg_detect_indices)
+false_alarm_rate_il = false_alarms_il * 10 / (sum_anm_start_index/52)
+print("False alarm rate for IL: ", false_alarm_rate_il, "per 10 years")
+df_il["alarms_num"] = df_il["anomaly_detected_index"].apply(
+    lambda x: len(x) if len(x) > 0 else 0
+)
+df_il.loc[df_il["detection_rate"] == 0, "alarms_num"] = 0
+df_il_mean = df_il.groupby("anomaly_magnitude").agg(
+    {
+        "mse_LL": ["mean", "std"],
+        "mse_LT": ["mean", "std"],
+        "detection_time": ["mean", "std"],
+        "detection_rate": ["mean", "std"],
+        "alarms_num": ["mean", "std"],
+    }
+)
+# Plot
+fig, ax = plt.subplots(3, 1, figsize=(6, 3.5), constrained_layout=True)
+# fig, ax = plt.subplots(3, 1, figsize=(3, 2.5), constrained_layout=True)
+
+
+# Plot for detection_time
+ax[0].plot(df_il_mean.index, df_il_mean["detection_time"]["mean"], label=r"\textbf{RSI}")
+ax[0].fill_between(
+    df_il_mean.index,
+    df_il_mean["detection_time"]["mean"] - df_il_mean["detection_time"]["std"],
+    df_il_mean["detection_time"]["mean"] + df_il_mean["detection_time"]["std"],
+    alpha=0.2,
+)
+ax[0].set_ylabel(r"$\Delta_t(\mathrm{y})$")
+# ax[2].set_yticks([0, 52, 104, 156, 208, 260])
+ax[0].set_yticks([0, 52, 104, 156])
+ax[0].set_yticklabels([0, 1, 2, 3])
+ax[0].set_xscale('log')
+ax[0].set_ylim(0, 52 * 3.05)
+ax[0].set_xticklabels([])
+# ax[0].legend(ncol=3)
+# Show the legend outside the plot
+# ax[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+ax[0].legend(bbox_to_anchor=(0, 2.5), loc='upper left', borderaxespad=0., ncol=3)
+
+# Plot for detection_rate
+ax[1].plot(df_il_mean.index, df_il_mean["detection_rate"]["mean"], label="IL")
+ax[1].set_ylabel(r"$\mathcal{P}_{\mathtt{DET}}$")
+# ax[3].set_ylabel(r"$\Pr_{\mathrm{detect}}$")
+ax[1].set_ylim(-0.05, 1.05)
+ax[1].set_yticks([0, 0.5, 1])
+ax[1].set_xscale('log')
+# ax[3].ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
+ax[1].set_xticklabels([])
+
+# Plot the number of false alarms for prophet
+ax[2].plot(df_il_mean.index, df_il_mean["alarms_num"]["mean"], label="IL", color = "tab:blue")
+ax[2].fill_between(
+    df_il_mean.index,
+    df_il_mean["alarms_num"]["mean"] - df_il_mean["alarms_num"]["std"],
+    df_il_mean["alarms_num"]["mean"] + df_il_mean["alarms_num"]["std"],
+    alpha=0.2,
+    color = "tab:blue"
+)
+ax[2].set_xlabel("Anomaly Magnitude (unit/$y$)")
+ax[2].set_ylabel(r"$\#_{\mathtt{ALM}}$")
+# ax[2].set_yscale('symlog', linthresh=1e2)
+ax[2].set_yscale('symlog')
+ax[2].set_ylim(-0.01, 5e2)
+ax[2].set_xscale('log')
+
+fig.align_ylabels(ax)
+
+plt.tight_layout(h_pad=0.1, w_pad=0.1)
+plt.subplots_adjust(hspace=0.3)
+# plt.savefig('syn_ts_results_legend.png', dpi=300)
+plt.show()
